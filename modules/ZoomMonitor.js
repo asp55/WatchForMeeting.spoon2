@@ -2,7 +2,7 @@ const { createLogger } = require("./Logger.js");
 const createEventHandler = require("./EventHandler.js");
 
 const POLL_SECONDS = 0.5;
-const ZOOM_APP_NAME = "zoom.us";
+const ZOOM_APP_NAME = "Zoom";
 
 // Hammerspoon 2 has no hs.window.filter, so instead of reacting to Zoom window
 // events we poll Zoom's "Meeting" menu. While in a meeting Zoom shows either
