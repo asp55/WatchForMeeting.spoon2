@@ -131,9 +131,18 @@ function loadMonitorHtml() {
     return monitorHtml;
 }
 
+// A VPN makes the primary interface a tunnel (utun*, ppp*, ...) whose address isn't
+// reachable from the LAN, so prefer a physical interface (enN) for the websocket URL.
 function primaryIPv4() {
-    const iface = hs.network.primaryInterface();
-    const entry = hs.network.addresses().find((a) => a.interface === iface && a.family === "ipv4");
+    const usable = (a) => a.family === "ipv4"
+        && !a.address.startsWith("127.")
+        && !a.address.startsWith("169.254.");
+    const addrs = hs.network.addresses().filter(usable);
+    const physical = addrs.filter((a) => /^en\d+$/.test(a.interface));
+    const primary = hs.network.primaryInterface();
+    const entry = physical.find((a) => a.interface === primary)
+        || physical[0]
+        || addrs.find((a) => a.interface === primary);
     return entry ? entry.address : "localhost";
 }
 
