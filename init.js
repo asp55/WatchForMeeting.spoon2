@@ -9,8 +9,8 @@
 
 const { createLogger } = require("./modules/Logger.js");
 const createEventHandler = require("./modules/EventHandler.js");
-const createZoomMonitor = require("./modules/ZoomMonitor.js");
-const createTeamsMonitor = require("./modules/TeamsMonitor.js");
+const zoomMonitor = require("./modules/ZoomMonitor.js");
+const teamsMonitor = require("./modules/TeamsMonitor.js");
 
 const VERSION = "0.0.1";
 const log = createLogger("WatchForMeeting");
@@ -25,8 +25,6 @@ const EVENT_NAMES = [
 const eventHandler = createEventHandler(EVENT_NAMES, "WatchForMeeting");
 const EVENTS = eventHandler.eventNames;
 
-const zoomMonitor = createZoomMonitor();
-const teamsMonitor = createTeamsMonitor();
 teamsMonitor.version = VERSION;
 
 //-----------------------------------------
