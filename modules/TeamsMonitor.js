@@ -1,138 +1,185 @@
+// WatchForMeeting/modules/TeamsMonitor.js
+// Monitors Microsoft Teams through its local "Third-party app API" websocket.
+
 const { createLogger } = require("./Logger.js");
 const createEventHandler = require("./EventHandler.js");
 
-const TOKEN_KEY = "WatchForMeeting.teamsToken";
-
-// Monitors Microsoft Teams through its local "Third-party app API" websocket.
-const logger = createLogger("WatchForMeeting.TeamsMonitor");
+//-----------------------------------------
+// Logger & Events
+//-----------------------------------------
+const Logger = createLogger("WatchForMeeting.TeamsMonitor");
 const events = createEventHandler(["meetingChange"], "WatchForMeeting.TeamsMonitor");
 
-let version = "0";
-let meetingState = null;
-let ws = null;
-let connectionId = 0;
-let pairing = false;
-let running = false;
-let closedCount = 0;
-let retryTimer = null;
+//-----------------------------------------
+// Declare Variables
+//-----------------------------------------
 
-const clearRetry = () => {
-    if (retryTimer) {
+const TOKEN_KEY = "WatchForMeeting.teamsToken";
+
+// TeamsMonitor.version
+// Set by the parent spoon, sent to Teams as the app-version.
+let version = "0";
+
+// TeamsMonitor.meetingState
+// Read-only { micOpen, videoOn, sharing } or null when not in a Teams meeting.
+let meetingState = null;
+
+// private variable to track if the monitor is already running or not.
+let running = false;
+
+let teamsPairing = false;
+let teamsWebsocket = null;
+let teamsConnectionId = 0;
+let retryTimer = null;
+let closedCount = 0;
+
+//-----------------------------------------
+// End of Declare Variables
+//-----------------------------------------
+
+
+//-----------------------------------------
+// Teams Monitor
+//-----------------------------------------
+
+function clearRetry() {
+    if(retryTimer) {
         retryTimer.stop();
         retryTimer = null;
     }
-};
+}
 
-const scheduleConnect = (seconds) => {
+function scheduleConnect(seconds) {
     clearRetry();
-    retryTimer = hs.timer.doAfter(seconds, connect);
-};
+    retryTimer = hs.timer.doAfter(seconds, connectToTeams);
+}
 
-const disconnect = () => {
-    logger.debug("disconnect()");
-    clearRetry();
-    if (ws) {
-        const old = ws;
-        ws = null;
-        try { old.close(); } catch (err) { logger.debug("close failed:", err); }
+function closeWebsocket() {
+    if(teamsWebsocket) {
+        const old = teamsWebsocket;
+        teamsWebsocket = null;
+        try { old.close(); } catch(e) { Logger.debug("close failed:", e); }
     }
-};
+}
 
-const setMeetingState = (next) => {
+function disconnectFromTeams() {
+    Logger.debug("disconnectFromTeams()");
+    clearRetry();
+    closeWebsocket();
+}
+
+function setMeetingState(next) {
     const same = next && meetingState
         ? next.micOpen === meetingState.micOpen &&
           next.videoOn === meetingState.videoOn &&
           next.sharing === meetingState.sharing
         : next === meetingState;
-    if (!same) {
+
+    if(!same) {
         meetingState = next;
         events.emit("meetingChange", { meetingState });
     }
-};
+}
 
-const onMessage = (message) => {
-    logger.debug("onMessage", message);
-    let parsed;
-    try {
-        parsed = JSON.parse(message);
-    } catch (err) {
-        logger.warn("Failed to parse Teams message:", message);
-        return;
-    }
+function connectToTeams() {
+    Logger.debug(`connectToTeams()`);
+    retryTimer = null;
 
-    if (parsed.tokenRefresh) {
-        logger.debug("Teams token refreshed");
-        hs.userdefaults.set(TOKEN_KEY, parsed.tokenRefresh);
-    }
+    // Increment the connection ID before closing, so any callbacks from the
+    // previous connection are ignored even if close() fires synchronously.
+    teamsConnectionId++;
+    const myId = teamsConnectionId;
+    closeWebsocket();
 
-    const update = parsed.meetingUpdate;
-    if (update && update.meetingPermissions && update.meetingPermissions.canPair && !pairing) {
-        logger.debug("Sending pairing request");
-        pairing = true;
-        if (ws) ws.send('{"action":"pair","parameters":{},"requestId":1}');
-    }
-
-    if (parsed.response === "Pairing response resulted in no action") {
-        logger.info("Didn't pair. Will try again next meeting.");
-        pairing = false;
-    }
-
-    if (update) {
-        const ms = update.meetingState;
-        if (ms && ms.isInMeeting) {
-            setMeetingState({
-                micOpen: !ms.isMuted,
-                videoOn: !!ms.isVideoOn,
-                sharing: !!ms.isSharing,
-            });
-        } else {
-            setMeetingState(null);
+    const onTeamsClose = ()=>{
+        if(myId === teamsConnectionId) {
+            Logger.debug("Teams WebSocket Closed");
+            teamsWebsocket = null;
+            teamsPairing = false;
+            if(running) {
+                closedCount++;
+                if(closedCount > 3) {
+                    Logger.warn("Teams WebSocket closed multiple times in a row");
+                    Logger.warn("This likely means this app was blocked from the Third-party app API in teams.");
+                    Logger.warn("Go to Settings > Privacy > Third-party app API > Manage API and remove the application from block.");
+                    Logger.warn("Then restart this spoon.");
+                    TeamsMonitor.stop();
+                }
+                else {
+                    Logger.info("Teams not available, retrying in 5 seconds");
+                    scheduleConnect(5);
+                }
+            }
         }
     }
-};
 
-const onClosed = () => {
-    ws = null;
-    pairing = false;
-    if (!running) return;
-    closedCount += 1;
-    if (closedCount > 3) {
-        logger.warn("Teams WebSocket closed multiple times in a row");
-        logger.warn("This likely means this app was blocked from the Third-party app API in teams.");
-        logger.warn("Go to `Settings > Privacy > Third-party app API > Manage API` and remove the application from block.");
-        logger.warn("Then restart this spoon.");
-        monitor.stop();
-    } else {
-        logger.info("Teams not available, retrying in 5 seconds");
-        scheduleConnect(5);
-    }
-};
-
-const onFail = () => {
-    ws = null;
-    if (!running) return;
-    logger.warn("Teams not available, retrying in 30 seconds");
-    scheduleConnect(30);
-};
-
-function connect() {
-    logger.debug("connect()");
-    retryTimer = null;
-    // Bump the id first so callbacks from the previous socket are ignored,
-    // even if close() fires its callback synchronously.
-    connectionId += 1;
-    const myId = connectionId;
-    if (ws) {
-        const old = ws;
-        ws = null;
-        try { old.close(); } catch (err) { logger.debug("close failed:", err); }
+    const onTeamsOpen = ()=>{
+        if(myId === teamsConnectionId) {
+            Logger.debug("Connected to Teams local API");
+        }
     }
 
-    const token = hs.userdefaults.get(TOKEN_KEY) || "";
+    const onTeamsMessage = (message)=>{
+        if(myId === teamsConnectionId) {
+            Logger.debug("Teams WebSocket Received", message);
+
+            let parsed;
+            try {
+                parsed = JSON.parse(message);
+            }
+            catch(e) {
+                Logger.warn("Failed to parse Teams message: ", message);
+                return;
+            }
+
+            if(parsed.tokenRefresh) {
+                Logger.debug("Teams token refreshed");
+                hs.userdefaults.set(TOKEN_KEY, parsed.tokenRefresh);
+            }
+
+            const update = parsed.meetingUpdate;
+            if(update) {
+                if(update.meetingPermissions && update.meetingPermissions.canPair && !teamsPairing) {
+                    Logger.debug("Sending pairing request");
+                    teamsPairing = true;
+                    if(teamsWebsocket) teamsWebsocket.send('{"action":"pair","parameters":{},"requestId":1}');
+                }
+
+                const ms = update.meetingState;
+                if(ms && ms.isInMeeting) {
+                    setMeetingState({
+                        micOpen: !ms.isMuted,
+                        videoOn: !!ms.isVideoOn,
+                        sharing: !!ms.isSharing,
+                    });
+                }
+                else {
+                    setMeetingState(null);
+                }
+            }
+
+            if(parsed.response === "Pairing response resulted in no action") {
+                Logger.info("Didn't pair. Will try again next meeting.");
+                teamsPairing = false;
+            }
+        }
+    }
+
+    const onTeamsError = (err)=>{
+        if(myId === teamsConnectionId) {
+            Logger.debug("Teams WebSocket Error", err);
+            teamsWebsocket = null;
+            if(running) {
+                Logger.warn("Teams not available, retrying in 30 seconds");
+                scheduleConnect(30);
+            }
+        }
+    }
+
     const params = {
-        token,
+        token: hs.userdefaults.get(TOKEN_KEY) || "",
         "protocol-version": "2.0.0",
-        manufacturer: "Hammerspoon",
+        manufacturer: "Hammerspoon2",
         device: "WatchForMeeting.spoon2",
         app: "WatchForMeeting.spoon2",
         "app-version": version,
@@ -140,58 +187,79 @@ function connect() {
     const query = Object.entries(params)
         .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
         .join("&");
+    const url = `ws://localhost:8124?${query}`;
 
-    const guard = (fn) => (...args) => { if (myId === connectionId) fn(...args); };
 
-    logger.debug("Connecting to Teams");
-    const socket = hs.http.openWebSocket(`ws://localhost:8124?${query}`);
-    if (!socket) {
-        logger.error("Could not create Teams websocket");
-        onFail();
-        return;
-    }
-    ws = socket;
-    socket
-        .setOpenCallback(guard(() => logger.debug("Connected to Teams local API")))
-        .setMessageCallback(guard(onMessage))
-        .setCloseCallback(guard(onClosed))
-        .setErrorCallback(guard((desc) => {
-            logger.debug("Teams websocket error:", desc);
-            onFail();
-        }));
+    teamsWebsocket = hs.http.openWebSocket(url)
+        .setOpenCallback(onTeamsOpen)
+        .setMessageCallback(onTeamsMessage)
+        .setCloseCallback(onTeamsClose)
+        .setErrorCallback(onTeamsError);
 }
 
-const monitor = {
+//-----------------------------------------
+// End Teams Monitor
+//-----------------------------------------
+
+
+const TeamsMonitor = {
     name: "WatchForMeeting.TeamsMonitor",
     appName: "teams",
-    logger,
+    logger: Logger,
 
-    get version() { return version; },
-    set version(v) { version = String(v); },
-    get meetingState() { return meetingState; },
-
-    on(event, fn) { events.on(event, fn); return monitor; },
-    once(event, fn) { events.once(event, fn); return monitor; },
-    off(event, fn) { events.off(event, fn); return monitor; },
-    removeAllListeners(event) { events.removeAllListeners(event); return monitor; },
-
-    start() {
-        logger.debug(`start()${ws ? " - skipping" : " - starting"}`);
-        if (!ws && !retryTimer) {
-            running = true;
-            connect();
-        }
-        return monitor;
+    get version() {
+        return version;
     },
-
-    stop() {
-        logger.debug("stop()");
-        running = false;
-        closedCount = 0;
-        disconnect();
-        meetingState = null;
-        return monitor;
+    set version(v) {
+        version = String(v);
+    },
+    get meetingState() {
+        return meetingState;
     },
 };
 
-module.exports = monitor;
+TeamsMonitor.on = function (event, fn) {
+    events.on(event, fn);
+    return module.exports;
+};
+
+TeamsMonitor.once = function (event, fn) {
+    events.once(event, fn);
+    return module.exports;
+};
+
+TeamsMonitor.off = function (event, fn) {
+    events.off(event, fn);
+    return module.exports;
+};
+
+TeamsMonitor.removeAllListeners = function (event) {
+    events.removeAllListeners(event);
+    return module.exports;
+};
+
+TeamsMonitor.start = function () {
+    Logger.debug(`start()${teamsWebsocket ? " - skipping" : " - starting"}`);
+    if(!teamsWebsocket && !retryTimer) {
+        running = true;
+        connectToTeams();
+    }
+
+    return module.exports;
+};
+
+TeamsMonitor.stop = function () {
+    Logger.debug("stop()");
+
+    running = false;
+    closedCount = 0;
+    teamsPairing = false;
+
+    disconnectFromTeams();
+    meetingState = null;
+
+    return module.exports;
+};
+
+
+module.exports = TeamsMonitor;
