@@ -12,7 +12,6 @@ const createEventHandler = require("./modules/EventHandler.js");
 const zoomMonitor = require("./modules/ZoomMonitor.js");
 const teamsMonitor = require("./modules/TeamsMonitor.js");
 
-const VERSION = "0.0.1";
 const log = createLogger("WatchForMeeting");
 
 // Pseudo-events for on() / once() / off()
@@ -25,8 +24,6 @@ const EVENT_NAMES = [
 const eventHandler = createEventHandler(EVENT_NAMES, "WatchForMeeting");
 const EVENTS = eventHandler.eventNames;
 
-teamsMonitor.version = VERSION;
-
 //-----------------------------------------
 // Settings
 //-----------------------------------------
@@ -37,28 +34,48 @@ const sharingDefaults = {
 };
 // menubar: enabled, color, detailed, showFullState
 const menubarDefaults = { enabled: true, color: true, detailed: true, showFullState: true };
-// apps: which monitors run in automatic mode. Applied on next start()/restart().
-const appsDefaults = { zoom: true, teams: false };
 
-let sharingSettings = { ...sharingDefaults };
-let appsSettings = { ...appsDefaults };
-let menubarSettings = makeMenubarSettings({});
+// apps: which monitors run in automatic mode. If already started, changing will trigger a restart.
+const appsDefaults = { zoom: false, teams: false };
 
-function makeMenubarSettings(values) {
-    return new Proxy({ ...menubarDefaults, ...values }, {
-        set(target, key, value) {
-            target[key] = value;
-            if (key === "enabled") {
-                if (menuBar) {
-                    if (value) { menuBar.show(); updateMenuIcon(); } else { menuBar.hide(); }
-                }
-            } else {
-                updateMenuIcon();
-            }
-            return true;
-        },
-    });
+const sharingValues = { ...sharingDefaults };
+const menubarValues = { ...menubarDefaults };
+const appsValues = { ...appsDefaults };
+
+// Applies a change to the menubar settings. `key` is the changed key, or undefined for a batch.
+function applyMenubarChange(key) {
+    if (!menuBar || !running) return;
+    if (key === undefined || key === "enabled") {
+        if (menubarValues.enabled) menuBar.show(); else menuBar.hide();
+    }
+    updateMenuIcon();
 }
+
+// Applies a change to the sharing settings by reconnecting with the new values.
+function applySharingChange() {
+    if (!running) return;
+    disconnectFromSharing();
+    connectionError = false;
+    connectionAttempts = 0;
+    if (sharingValues.enabled && validateShareSettings()) connectToSharing();
+}
+
+// Applies a change to the apps settings by restarting, so the right monitors run.
+function applyAppsChange() {
+    if (running) WatchForMeeting.restart();
+}
+
+// Setting a key on the proxy applies the change immediately.
+const makeSettingsProxy = (values, apply) => new Proxy(values, {
+    set(target, key, value) {
+        target[key] = value;
+        apply(key);
+        return true;
+    },
+});
+const sharingSettings = makeSettingsProxy(sharingValues, () => applySharingChange());
+const menubarSettings = makeSettingsProxy(menubarValues, applyMenubarChange);
+const appsSettings = makeSettingsProxy(appsValues, () => applyAppsChange());
 
 //-----------------------------------------
 // State
@@ -346,8 +363,9 @@ teamsMonitor.on("meetingChange", () => handleAppChange(teamsMonitor));
 //-----------------------------------------
 const WatchForMeeting = {
 
-    // Called by hs.loadSpoon(). Idempotent.
+    // Called by hs.loadSpoon() after it injects author/description/version from spoon.json. Idempotent.
     init() {
+        teamsMonitor.version = this.version; // sent to Teams as the app-version
         return WatchForMeeting;
     },
 
@@ -449,25 +467,20 @@ Object.defineProperties(WatchForMeeting, {
     meetingApp: { get: () => meetingApp, enumerable: true },
     faking: { get: () => faking, enumerable: true },
     zoom: { get: () => zoomMonitor.zoom, enumerable: true },
-    // Read/write. Assigning an object merges it over the defaults.
+    // Read/write. Assigning an object merges it over the current values; changes apply immediately.
     sharing: {
         get: () => sharingSettings,
-        set: (v) => { sharingSettings = { ...sharingDefaults, ...v }; },
+        set: (v) => { Object.assign(sharingValues, v); applySharingChange(); },
         enumerable: true,
     },
     apps: {
         get: () => appsSettings,
-        set: (v) => { appsSettings = { ...appsDefaults, ...v }; },
+        set: (v) => { Object.assign(appsValues, v); applyAppsChange(); },
         enumerable: true,
     },
     menubar: {
         get: () => menubarSettings,
-        set: (v) => {
-            menubarSettings = makeMenubarSettings(v);
-            if (menuBar && running) {
-                if (menubarSettings.enabled) { menuBar.show(); updateMenuIcon(); } else { menuBar.hide(); }
-            }
-        },
+        set: (v) => { Object.assign(menubarValues, v); applyMenubarChange(); },
         enumerable: true,
     },
     mode: {

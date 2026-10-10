@@ -1,6 +1,6 @@
 {
     "name": "WatchForMeeting",
     "author": "Andrew Parnell <aparnell@gmail.com>",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "description": "A Spoon to answer the question: Are you in a meeting? Watches for a supported app (Zoom, Microsoft Teams), whether you are on a call, and whether you are muted, on camera and/or screen sharing, then lets you share that information."
 }
