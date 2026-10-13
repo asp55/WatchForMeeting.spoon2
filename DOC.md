@@ -1,73 +1,23 @@
 # WatchForMeeting API
 
 ```js
-const wfm = hs.loadSpoon("WatchForMeeting");
-wfm.apps = { zoom: true, teams: true };
-wfm.start();
+const WatchForMeeting = hs.loadSpoon("WatchForMeeting");
+WatchForMeeting.apps = { zoom: true, teams: true };
+WatchForMeeting.start();
 ```
 
-Everything on `wfm` is either a **method** (chainable, returns `wfm`), a **setting** (read/write property), or a **read-only property**.
+Everything on `WatchForMeeting` is either a **method** (chainable, returns `WatchForMeeting`), a **setting** (read/write property), or a **read-only property**.
 
+- [Properties](#Properties)
 - [Methods](#methods)
-- [Settings](#settings)
-- [Read-only properties](#read-only-properties)
 - [Events](#events)
-- [Meeting state](#meeting-state)
 - [Status sharing](#status-sharing)
-- [Menubar icon](#menubar-icon)
 
 ---
 
-## Methods
+## Properties
 
-All methods return `wfm`, so calls can be chained: `wfm.on("micOn", fn).start()`.
-
-### Lifecycle
-
-| Method | Description |
-|---|---|
-| `start()` | Starts the spoon. Connects status sharing (if enabled and valid), shows the menubar item (if enabled), then enters the current `mode` (`auto()` or `fake()`). Does nothing if already running. |
-| `stop()` | Stops monitoring, shuts down status sharing, hides the menubar item. Event listeners and settings are kept. |
-| `restart()` | `stop()` followed by `start()`. |
-
-### Mode
-
-| Method | Description |
-|---|---|
-| `auto()` | Sets `mode` to `"auto"`. Monitors the apps enabled in `wfm.apps` and reports their real state. The menubar menu shows **Automatic** checked. |
-| `fake(micOpen = false, videoOn = false, sharing = false)` | Sets `mode` to `"fake"`. Stops all monitors and reports you as in a meeting with the given state (a "busy" override). The menubar menu lets you toggle mic, video and sharing by hand. |
-
-Both can be called before `start()`; the mode is remembered and applied when the spoon starts. While running, either call immediately updates the menubar, sharing clients and listeners.
-
-```js
-wfm.fake(true, false, false); // busy, mic open
-wfm.auto();                   // back to watching apps
-```
-
-### Events
-
-| Method | Description |
-|---|---|
-| `on(event, fn)` | Adds a listener. Adding the same `fn` twice for an event is ignored. |
-| `once(event, fn)` | Like `on`, but the listener is removed after its first call. |
-| `off(event, fn)` | Removes one listener. With no `fn`, removes every listener for `event`. |
-| `removeAllListeners(event)` | Removes every listener for `event`. With no `event`, removes all listeners for all events. |
-
-`on`, `once` and `off` throw if `event` is not in `wfm.events`, or if `fn` is not a function. An exception thrown inside a listener is logged and does not affect other listeners.
-
-### Other
-
-| Method | Description |
-|---|---|
-| `init()` | Called by `hs.loadSpoon()`. Idempotent; you shouldn't need to call it. |
-
----
-
-## Settings
-
-Settings can be assigned before or after `start()`. Assigning an object **merges** it over the current values, so you only need to supply what you want to change. Changes to `apps`, `sharing` and `menubar` take effect immediately while running.
-
-### `wfm.apps`
+### `WatchForMeeting.apps`
 
 Which applications are monitored in automatic mode.
 
@@ -76,13 +26,14 @@ Which applications are monitored in automatic mode.
 | `zoom` | `false` | Watch the Zoom desktop app. |
 | `teams` | `false` | Watch Microsoft Teams (v2). Requires the [Third-Party app API](README.md#enable-the-teams-3rd-party-api). |
 
-Both default to `false`, so nothing is monitored until you enable an app. Changing `wfm.apps` while the spoon is running **restarts it**, whether you assign an object (restarts once) or a single key such as `wfm.apps.zoom = true`.
+Both default to `false`, so nothing is monitored until you enable an app. Changing `WatchForMeeting.apps` while the spoon is running **restarts it**, whether you assign an object (restarts once) or a single key such as `WatchForMeeting.apps.zoom = true`.
 
 ```js
-wfm.apps = { zoom: true, teams: true };
+WatchForMeeting.apps = { zoom: true, teams: true };
 ```
 
-### `wfm.sharing`
+### `WatchForMeeting.sharing`
+`object`
 
 Controls how status is shared with other devices. See [Status sharing](#status-sharing) for what is sent.
 
@@ -100,13 +51,14 @@ Changing a sharing setting while running reconnects sharing right away (assignin
 
 ```js
 // Self hosted, on a different port (takes effect immediately)
-wfm.sharing = { port: 9000 };
+WatchForMeeting.sharing = { port: 9000 };
 
 // External server
-wfm.sharing = { useServer: true, serverURL: "wss://example.com/ws", key: "my-room-key" };
+WatchForMeeting.sharing = { useServer: true, serverURL: "wss://example.com/ws", key: "my-room-key" };
 ```
 
-### `wfm.menubar`
+### `WatchForMeeting.menubar`
+`object`
 
 Appearance of the menubar item.
 
@@ -120,45 +72,34 @@ Appearance of the menubar item.
 Changes apply immediately, including while running:
 
 ```js
-wfm.menubar.color = false;
-wfm.menubar.enabled = false;
+WatchForMeeting.menubar.color = false;
+WatchForMeeting.menubar.enabled = false;
 ```
 
 Assigning an object merges it over the current values; unspecified keys are left unchanged.
 
 ```js
-wfm.menubar = { color: false }; // other keys keep their current values
+WatchForMeeting.menubar = { color: false }; // other keys keep their current values
 ```
 
-### `wfm.mode`
+### `WatchForMeeting.mode`
+`string`
 
-`"auto"` or `"fake"`. Assigning is equivalent to calling `wfm.auto()` / `wfm.fake()`. Any other value throws.
+`"auto"` or `"fake"`. Assigning is equivalent to calling `WatchForMeeting.auto()` / `WatchForMeeting.fake()`. Any other value throws.
 
-### `wfm.logLevel`
+### `WatchForMeeting.logLevel`
+`string`
 
 Verbosity of the spoon's console logging, one of `"error"`, `"warn"`, `"info"`, `"log"` (default), `"debug"`, ordered from least to most output. Applies to the spoon and its internal modules. Any other value throws.
 
 ```js
-wfm.logLevel = "debug";
+WatchForMeeting.logLevel = "debug";
 ```
 
----
 
-## Read-only properties
-
-| Property | Type | Description |
-|---|---|---|
-| `wfm.events` | `string[]` | Frozen list of valid event names. |
-| `wfm.meetingState` | `object \| null` | Current [meeting state](#meeting-state), or `null` if not in a meeting. |
-| `wfm.meetingApp` | `string \| null` | Which source is reporting the current meeting: `"zoom"`, `"teams"`, `"fake"`, or `null` when not in a meeting. |
-| `wfm.faking` | `boolean` | `true` while in fake mode and running. |
-| `wfm.zoom` | `hs.application \| null` | The Zoom application object while the Zoom monitor is running and Zoom is open, otherwise `null`. |
-
----
-
-## Events
-
-Subscribe with `on` / `once`. Every `*Change` event fires for any change of that kind; the `On` / `Off` events fire for the specific direction.
+### `WatchForMeeting.events`
+`string[]` (Read-Only) 
+List of valid event names
 
 | Event | Fires when |
 |---|---|
@@ -171,6 +112,87 @@ Subscribe with `on` / `once`. Every `*Change` event fires for any change of that
 | `videoOn` / `videoOff` | Camera turns on / off. |
 | `screensharingChange` | Screen sharing state changes (fires with `screensharingOn` or `screensharingOff`). |
 | `screensharingOn` / `screensharingOff` | Screen sharing starts / stops. |
+
+### `WatchForMeeting.meetingState`
+`object | null` (Read-Only) 
+`WatchForMeeting.meetingState` is `null` when not in a meeting, otherwise:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `micOpen` | `boolean` | Microphone is unmuted. |
+| `videoOn` | `boolean` | Camera is on. |
+| `sharing` | `boolean` | Screen sharing is active. |
+
+Only one app is tracked at a time. When one app reports a meeting, the other monitors are stopped until that meeting ends.
+
+How each app is detected:
+
+- **Zoom**: polls Zoom's *Meeting* menu twice a second. Being in a meeting is inferred from the presence of *Mute audio* / *Unmute audio*; video and sharing from *Start video* / *Start share*. Requires Hammerspoon to have Accessibility permission.
+- **Teams**: connects to the local Third-Party app API (`ws://localhost:8124`) and pairs on first use. Teams will prompt you to allow the pairing. The token is stored in Hammerspoon's user defaults so you only pair once. If Teams closes the connection several times in a row the monitor stops, and you must allow the app in *Teams > Settings > Privacy > Third-party app API > Manage API* and restart the spoon.
+
+### `WatchForMeeting.meetingApp`
+`string | null` (Read-Only) 
+Which source is reporting the current meeting: `"zoom"`, `"teams"`, `"fake"`, or `null` when not in a meeting.
+
+### `WatchForMeeting.faking`
+`boolean` (Read-Only)
+`true` while in fake mode and running.
+
+
+### `WatchForMeeting.zoom`
+`hs.application | null` (Read-Only) 
+The Zoom application object while the Zoom monitor is running and Zoom is open, otherwise `null`.
+
+---
+
+## Methods
+
+All methods return `WatchForMeeting`, so calls can be chained: `WatchForMeeting.on("micOn", fn).start()`.
+
+### Lifecycle
+
+| Method | Description |
+|---|---|
+| `start()` | Starts the spoon. Connects status sharing (if enabled and valid), shows the menubar item (if enabled), then enters the current `mode` (`auto()` or `fake()`). Does nothing if already running. |
+| `stop()` | Stops monitoring, shuts down status sharing, hides the menubar item. Event listeners and settings are kept. |
+| `restart()` | `stop()` followed by `start()`. |
+
+### Mode
+
+| Method | Description |
+|---|---|
+| `auto()` | Sets `mode` to `"auto"`. Monitors the apps enabled in `WatchForMeeting.apps` and reports their real state. The menubar menu shows **Automatic** checked. |
+| `fake(micOpen = false, videoOn = false, sharing = false)` | Sets `mode` to `"fake"`. Stops all monitors and reports you as in a meeting with the given state (a "busy" override). The menubar menu lets you toggle mic, video and sharing by hand. |
+
+Both can be called before `start()`; the mode is remembered and applied when the spoon starts. While running, either call immediately updates the menubar, sharing clients and listeners.
+
+```js
+WatchForMeeting.fake(true, false, false); // busy, mic open
+WatchForMeeting.auto();                   // back to watching apps
+```
+
+### Events
+
+| Method | Description |
+|---|---|
+| `on(event, fn)` | Adds a listener. Adding the same `fn` twice for an event is ignored. |
+| `once(event, fn)` | Like `on`, but the listener is removed after its first call. |
+| `off(event, fn)` | Removes one listener. With no `fn`, removes every listener for `event`. |
+| `removeAllListeners(event)` | Removes every listener for `event`. With no `event`, removes all listeners for all events. |
+
+`on`, `once` and `off` throw if `event` is not in `WatchForMeeting.events`, or if `fn` is not a function. An exception thrown inside a listener is logged and does not affect other listeners.
+
+### Other
+
+| Method | Description |
+|---|---|
+| `init()` | Called by `hs.loadSpoon()`. Idempotent; you shouldn't need to call it. |
+
+---
+
+## Events
+
+Subscribe with `on` / `once`. Every `*Change` event fires for any change of that kind; the `On` / `Off` events fire for the specific direction.
 
 A single update can produce several events. For example, joining a call with your mic open and camera on emits, in order: `meetingChange`, `meetingStarted`, `micChange`, `micOn`, `videoChange`, `videoOn`. Switching between `auto` and `fake` mode emits events for whatever differs between the two states.
 
@@ -186,29 +208,10 @@ Listeners receive one argument:
 Both the event object and `meetingState` are frozen; modifying them throws in strict mode and has no effect otherwise.
 
 ```js
-wfm.on("meetingStarted", (e) => console.log("In a meeting", e.meetingState));
-wfm.on("micChange", (e) => console.log(e.type));        // "micOn" or "micOff" is also emitted
-wfm.once("meetingStopped", () => console.log("Done"));
+WatchForMeeting.on("meetingStarted", (e) => console.log("In a meeting", e.meetingState));
+WatchForMeeting.on("micChange", (e) => console.log(e.type));        // "micOn" or "micOff" is also emitted
+WatchForMeeting.once("meetingStopped", () => console.log("Done"));
 ```
-
----
-
-## Meeting state
-
-`wfm.meetingState` is `null` when not in a meeting, otherwise:
-
-| Key | Type | Meaning |
-|---|---|---|
-| `micOpen` | `boolean` | Microphone is unmuted. |
-| `videoOn` | `boolean` | Camera is on. |
-| `sharing` | `boolean` | Screen sharing is active. |
-
-Only one app is tracked at a time. When one app reports a meeting, the other monitors are stopped until that meeting ends.
-
-How each app is detected:
-
-- **Zoom**: polls Zoom's *Meeting* menu twice a second. Being in a meeting is inferred from the presence of *Mute audio* / *Unmute audio*; video and sharing from *Start video* / *Start share*. Requires Hammerspoon to have Accessibility permission.
-- **Teams**: connects to the local Third-Party app API (`ws://localhost:8124`) and pairs on first use. Teams will prompt you to allow the pairing. The token is stored in Hammerspoon's user defaults so you only pair once. If Teams closes the connection several times in a row the monitor stops, and you must allow the app in *Teams > Settings > Privacy > Third-party app API > Manage API* and restart the spoon.
 
 ---
 
@@ -245,11 +248,3 @@ Both modes send the same update message. Keys are snake_case on the wire:
 ```
 
 `inMeeting` is `false` when not in a meeting.
-
----
-
-## Menubar icon
-
-The icon is chosen from `menubar-icons/<Color|Template>/<Detailed|Minimal>/` according to `wfm.menubar`, using the file name `Free.pdf` when not in a meeting, or `Meeting[-Mic][-Vid][-Screen][-Faking].pdf` when in one. `-Faking` is added in fake mode. With `showFullState: false` only `Free` and `Meeting` (plus `-Faking`) are used.
-
-The menu offers **Automatic** and **Busy**, equivalent to `auto()` and `fake()`. In Busy mode it also offers *Mic On*, *Video On*, *Sharing Screen* toggles, and *Select All* / *Select None* / *Clear* shortcuts.
