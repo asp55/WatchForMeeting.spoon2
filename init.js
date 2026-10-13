@@ -22,7 +22,11 @@ const EVENT_NAMES = [
     "screensharingChange", "screensharingOn", "screensharingOff",
 ];
 const eventHandler = createEventHandler(EVENT_NAMES, "WatchForMeeting");
-const EVENTS = eventHandler.eventNames;
+const EVENTS = eventHandler.eventNames.reduce((a,c)=>{
+    const o = {...a};
+    o[c] = c;
+    return o;
+}, {});
 
 //-----------------------------------------
 // Settings
