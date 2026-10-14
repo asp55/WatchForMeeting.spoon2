@@ -6,6 +6,8 @@ const { createLogger } = require("./Logger.js");
 function createEventHandler(acceptedEvents, objectName) {
     const logger = createLogger("WatchForMeeting.EventHandler");
     const eventNames = Object.freeze([...acceptedEvents]);
+    // e.g. events.meetingChange === "meetingChange"
+    const events = Object.freeze(Object.fromEntries(eventNames.map((name) => [name, name])));
     const listeners = new Map(); // event -> [{ fn, once }]
     const label = (event) => (objectName ? `${objectName}.${event}` : event);
 
@@ -34,6 +36,7 @@ function createEventHandler(acceptedEvents, objectName) {
 
     const handler = {
         eventNames,
+        events,
         logger,
 
         on(event, fn) { return add(event, fn, false); },

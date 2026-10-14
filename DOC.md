@@ -33,29 +33,45 @@ WatchForMeeting.apps = { zoom: true, teams: true };
 ```
 
 ### `WatchForMeeting.sharing`
-`object`
+`{ mode, settings }`
 
 Controls how status is shared with other devices. See [Status sharing](#status-sharing) for what is sent.
 
-| Key | Default | Description |
-|---|---|---|
-| `enabled` | `true` | Master switch for sharing. |
-| `useServer` | `false` | `false`: host a status page and websocket on this Mac. `true`: connect out to an external websocket server. |
-| `port` | `8080` | Self-hosted only. Port for the built-in HTTP/websocket server. Required when `useServer` is `false`. |
-| `serverURL` | `null` | External server only. Websocket URL (`ws://` / `wss://`). Required when `useServer` is `true`. |
-| `key` | `null` | External server only. Key identifying this room to the server. Required when `useServer` is `true`. |
-| `maxConnectionAttempts` | `Infinity` | External server only. Consecutive failed connection attempts before giving up. `Infinity` never gives up. The counter resets after a successful connection. |
-| `waitBeforeRetry` | `5` | External server only. Seconds to wait between reconnection attempts. |
+`sharing.mode` (default `false`):
 
-Changing a sharing setting while running reconnects sharing right away (assigning an object reconnects once). If required settings for the chosen mode are missing, an error is logged and sharing is not started (monitoring and the menubar still work).
+| Value | Meaning |
+|---|---|
+| `false` | Sharing off. |
+| `"local"` | Serve a status page and websocket from this Mac, on `settings.port`. |
+| `"hosted"` | Connect out to a websocket server at `settings.serverURL`, identifying with `settings.key`. |
+
+`sharing.settings`:
+
+| Key | Default | Used by | Description |
+|---|---|---|---|
+| `port` | `8080` | `"local"` | Port for the built-in HTTP/websocket server. |
+| `serverURL` | `null` | `"hosted"` | Websocket URL (`ws://` / `wss://`). Required for `"hosted"` mode. |
+| `key` | `null` | `"hosted"` | Key identifying this room to the server. Required for `"hosted"` mode. |
+| `maxConnectionAttempts` | `Infinity` | `"hosted"` | Consecutive failed connection attempts before giving up. `Infinity` never gives up. The counter resets after a successful connection. |
+| `waitBeforeRetry` | `5` | `"hosted"` | Seconds to wait between reconnection attempts. |
+
+All settings are kept when you switch modes, so you can set up both and flip `mode` at any time. Changes apply immediately: when the spoon is running, changing `mode`, or a setting the active mode uses (`port` for `"local"`; `serverURL` or `key` for `"hosted"`), reconnects sharing. Other changes, such as `serverURL` while in `"local"` mode, are stored without disturbing the connection.
+
+You can assign a single value or several at once. Assigning `WatchForMeeting.sharing` or `WatchForMeeting.sharing.settings` **merges** over the current values; omitted keys are left alone. The whole result is validated first. An invalid result (unknown keys, an out-of-range `port`, `"hosted"` without `serverURL` and `key`, ...) throws and leaves the previous values in place.
 
 ```js
-// Self hosted, on a different port (takes effect immediately)
-WatchForMeeting.sharing = { port: 9000 };
+// Configure and switch on in one step
+WatchForMeeting.sharing = { mode: "hosted", settings: { serverURL: "wss://example.com/ws", key: "my-room-key" } };
 
-// External server
-WatchForMeeting.sharing = { useServer: true, serverURL: "wss://example.com/ws", key: "my-room-key" };
+// Change a single setting (reconnects if it matters for the current mode)
+WatchForMeeting.sharing.settings.port = 9000;
+
+// Switch modes; settings are retained
+WatchForMeeting.sharing.mode = "local";
+WatchForMeeting.sharing.mode = false;
 ```
+
+Set `serverURL` and `key` *before* switching to `"hosted"` (or in the same assignment as above); `WatchForMeeting.sharing.mode = "hosted"` on its own throws if they are still `null`.
 
 ### `WatchForMeeting.menubar`
 `object`
@@ -217,26 +233,26 @@ WatchForMeeting.once("meetingStopped", () => console.log("Done"));
 
 ## Status sharing
 
-When `sharing.enabled` is true the current state is pushed to listeners every time it changes.
+Unless `sharing.mode` is `false`, the current state is pushed to listeners every time it changes.
 
-### Self hosted (`useServer: false`)
+### Local (`mode: "local"`)
 
-The spoon starts an HTTP server on `sharing.port`:
+The spoon starts an HTTP server on `sharing.settings.port`:
 
 - `http://<your-ip>:<port>/` serves a status page (`monitor.html`).
 - `ws://<your-ip>:<port>/ws` is the websocket the page connects to. New connections immediately receive the current state.
 
 `<your-ip>` is the IPv4 address of the primary physical interface (`enN`); VPN tunnels are skipped. Falls back to `localhost`.
 
-### External server (`useServer: true`)
+### Hosted (`mode: "hosted"`)
 
-The spoon opens a websocket to `sharing.serverURL` and sends an identify message with `sharing.key`:
+The spoon opens a websocket to `sharing.settings.serverURL` and sends an identify message with `sharing.settings.key`:
 
 ```json
 { "action": "identify", "key": "<key>", "type": "room", "status": { "inMeeting": false } }
 ```
 
-If the connection drops or fails, it retries every `waitBeforeRetry` seconds up to `maxConnectionAttempts`. If the server rejects the key (`badkey`), sharing is shut down without retrying.
+If the connection drops or fails, it retries every `sharing.settings.waitBeforeRetry` seconds up to `sharing.settings.maxConnectionAttempts`. If the server rejects the key (`badkey`), sharing is shut down without retrying.
 
 ### Message format
 

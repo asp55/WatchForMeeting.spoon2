@@ -22,27 +22,25 @@ const EVENT_NAMES = [
     "screensharingChange", "screensharingOn", "screensharingOff",
 ];
 const eventHandler = createEventHandler(EVENT_NAMES, "WatchForMeeting");
-const EVENTS = eventHandler.eventNames.reduce((a,c)=>{
-    const o = {...a};
-    o[c] = c;
-    return o;
-}, {});
 
 //-----------------------------------------
 // Settings
 //-----------------------------------------
-// sharing: enabled, useServer, port, serverURL, key, maxConnectionAttempts (Infinity = never give up), waitBeforeRetry (s)
-const sharingDefaults = {
-    enabled: true, useServer: false, port: 8080,
-    serverURL: null, key: null, maxConnectionAttempts: Infinity, waitBeforeRetry: 5,
+// sharing: { mode, settings }
+//   mode: false (off) | "local" (host a status page on this Mac, uses port) | "hosted" (connect out, uses serverURL + key)
+//   settings: port, serverURL, key, maxConnectionAttempts (Infinity = never give up), waitBeforeRetry (s)
+const sharingSettingsDefaults = {
+    port: 8080, serverURL: null, key: null, maxConnectionAttempts: Infinity, waitBeforeRetry: 5,
 };
+const SHARING_MODES = [false, "local", "hosted"];
 // menubar: enabled, color, detailed, showFullState
 const menubarDefaults = { enabled: true, color: true, detailed: true, showFullState: true };
 
 // apps: which monitors run in automatic mode. If already started, changing will trigger a restart.
 const appsDefaults = { zoom: false, teams: false };
 
-const sharingValues = { ...sharingDefaults };
+let sharingMode = false;
+let sharingValues = Object.freeze({ ...sharingSettingsDefaults });
 const menubarValues = { ...menubarDefaults };
 const appsValues = { ...appsDefaults };
 
@@ -55,13 +53,107 @@ function applyMenubarChange(key) {
     updateMenuIcon();
 }
 
+// Throws on anything invalid rather than guessing what was meant. Returns the frozen settings.
+function validateSharing(mode, settings) {
+    if (!SHARING_MODES.includes(mode)) throw new Error(`sharing.mode must be false, "local" or "hosted"`);
+    const unknown = Object.keys(settings).filter((k) => !(k in sharingSettingsDefaults));
+    if (unknown.length) throw new Error(`unknown sharing setting(s): ${unknown.join(", ")}`);
+
+    const { port, serverURL, key, maxConnectionAttempts, waitBeforeRetry } = settings;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error("sharing.settings.port must be an integer from 1 to 65535");
+    }
+    if (serverURL !== null && (typeof serverURL !== "string" || !/^wss?:\/\/\S+$/.test(serverURL))) {
+        throw new Error("sharing.settings.serverURL must be null or a ws:// or wss:// URL");
+    }
+    if (key !== null && (typeof key !== "string" || !key)) {
+        throw new Error("sharing.settings.key must be null or a non-empty string");
+    }
+    if (typeof maxConnectionAttempts !== "number" || !(maxConnectionAttempts >= 1)) {
+        throw new Error("sharing.settings.maxConnectionAttempts must be a number >= 1 (or Infinity)");
+    }
+    if (typeof waitBeforeRetry !== "number" || !(waitBeforeRetry > 0)) {
+        throw new Error("sharing.settings.waitBeforeRetry must be a number > 0");
+    }
+    if (mode === "hosted" && (serverURL === null || key === null)) {
+        throw new Error(`sharing.mode "hosted" requires sharing.settings.serverURL and sharing.settings.key`);
+    }
+    return Object.freeze({ ...settings });
+}
+
+// What a connection actually depends on; changes outside this don't need a reconnect.
+const sharingSignature = (mode, v) => JSON.stringify(
+    mode === "local" ? [mode, v.port] : mode === "hosted" ? [mode, v.serverURL, v.key] : [mode]);
+
+// Validates the whole result, then applies it. Throws, leaving the current values, if invalid.
+function commitSharing(mode, settings) {
+    const next = validateSharing(mode, settings);
+    const changed = sharingSignature(mode, next) !== sharingSignature(sharingMode, sharingValues);
+    sharingMode = mode;
+    sharingValues = next;
+    if (changed) applySharingChange();
+}
+
+const readOnlyTraps = (what) => ({
+    deleteProperty() { throw new Error(`${what} can't be deleted; assign a value instead`); },
+    defineProperty() { throw new Error(`${what} can't be redefined; assign a value instead`); },
+});
+
+// Live view of sharing.settings. Setting a key applies immediately.
+const sharingSettingsView = new Proxy({}, {
+    get: (_, key) => Reflect.get(sharingValues, key),
+    has: (_, key) => Reflect.has(sharingValues, key),
+    ownKeys: () => Reflect.ownKeys(sharingValues),
+    getOwnPropertyDescriptor: (_, key) => (Reflect.has(sharingValues, key)
+        ? { value: sharingValues[key], enumerable: true, configurable: true, writable: true }
+        : undefined),
+    set(_, key, value) {
+        commitSharing(sharingMode, { ...sharingValues, [key]: value });
+        return true;
+    },
+    ...readOnlyTraps("sharing.settings keys"),
+});
+
+// Merges a partial { mode?, settings? } over the current sharing values and applies it.
+function assignSharing(v) {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) {
+        throw new Error("sharing must be an object like { mode, settings }");
+    }
+    const unknown = Object.keys(v).filter((k) => k !== "mode" && k !== "settings");
+    if (unknown.length) throw new Error(`unknown sharing key(s): ${unknown.join(", ")} (expected mode, settings)`);
+    if ("settings" in v && (typeof v.settings !== "object" || v.settings === null || Array.isArray(v.settings))) {
+        throw new Error("sharing.settings must be an object");
+    }
+    commitSharing("mode" in v ? v.mode : sharingMode, { ...sharingValues, ...v.settings });
+}
+
+// Live view of { mode, settings }. Setting mode or any settings key applies immediately.
+const sharingView = new Proxy({}, {
+    get(_, key) {
+        if (key === "mode") return sharingMode;
+        if (key === "settings") return sharingSettingsView;
+        return undefined;
+    },
+    has: (_, key) => key === "mode" || key === "settings",
+    ownKeys: () => ["mode", "settings"],
+    getOwnPropertyDescriptor: (_, key) => ((key === "mode" || key === "settings")
+        ? { value: key === "mode" ? sharingMode : sharingSettingsView, enumerable: true, configurable: true, writable: true }
+        : undefined),
+    set(_, key, value) {
+        if (key !== "mode" && key !== "settings") throw new Error(`unknown sharing key: ${String(key)} (expected mode, settings)`);
+        assignSharing({ [key]: value });
+        return true;
+    },
+    ...readOnlyTraps("sharing keys"),
+});
+
 // Applies a change to the sharing settings by reconnecting with the new values.
 function applySharingChange() {
     if (!running) return;
     disconnectFromSharing();
     connectionError = false;
     connectionAttempts = 0;
-    if (sharingValues.enabled && validateShareSettings()) connectToSharing();
+    connectToSharing();
 }
 
 // Applies a change to the apps settings by restarting, so the right monitors run.
@@ -77,7 +169,6 @@ const makeSettingsProxy = (values, apply) => new Proxy(values, {
         return true;
     },
 });
-const sharingSettings = makeSettingsProxy(sharingValues, () => applySharingChange());
 const menubarSettings = makeSettingsProxy(menubarValues, applyMenubarChange);
 const appsSettings = makeSettingsProxy(appsValues, () => applyAppsChange());
 
@@ -131,6 +222,7 @@ function updateMenuIcon() {
 // Status sharing (self hosted server / external server)
 //-----------------------------------------
 let server = null; // self hosted HSHTTPServer, or external websocket client
+let serverIsExternal = false;
 let websocketStatus = "closed";
 let connectionAttempts = 0;
 let connectionError = false;
@@ -167,7 +259,7 @@ function primaryIPv4() {
 
 function broadcast() {
     if (!server) return;
-    if (sharingSettings.useServer) {
+    if (serverIsExternal) {
         if (websocketStatus === "open") server.send(composeUpdate());
     } else {
         const msg = composeUpdate();
@@ -175,19 +267,6 @@ function broadcast() {
             try { conn.send(msg); } catch (err) { clients.delete(conn); }
         }
     }
-}
-
-function validateShareSettings() {
-    if (sharingSettings.useServer) {
-        if (!sharingSettings.serverURL) log.error("sharing.serverURL required when using a server");
-        if (!sharingSettings.key) log.error("sharing.key required when using a server");
-        return !!(sharingSettings.serverURL && sharingSettings.key);
-    }
-    if (!sharingSettings.port) {
-        log.error("sharing.port required when self hosting");
-        return false;
-    }
-    return true;
 }
 
 function disconnectFromSharing() {
@@ -198,40 +277,42 @@ function disconnectFromSharing() {
         server = null;
         websocketStatus = "closed";
         try {
-            if (sharingSettings.useServer) old.close(); else old.stop();
+            if (serverIsExternal) old.close(); else old.stop();
         } catch (err) { log.debug("disconnectFromSharing:", err); }
     }
 }
 
 function scheduleReconnect() {
-    const max = sharingSettings.maxConnectionAttempts;
+    const max = sharingValues.maxConnectionAttempts;
     if (connectionAttempts >= max) {
         log.error("Maximum Connection Attempts failed");
         disconnectFromSharing();
     } else if (connectionError || !running) {
         disconnectFromSharing();
     } else {
-        retryTimer = hs.timer.doAfter(sharingSettings.waitBeforeRetry, connectToSharing);
+        retryTimer = hs.timer.doAfter(sharingValues.waitBeforeRetry, connectToSharing);
     }
 }
 
 function connectExternal() {
-    log.debug(`Connecting to server at ${sharingSettings.serverURL}`);
+    const { serverURL, key } = sharingValues;
+    log.debug(`Connecting to server at ${serverURL}`);
     connectionAttempts += 1;
     websocketStatus = "connecting";
-    const ws = hs.http.openWebSocket(sharingSettings.serverURL);
+    const ws = hs.http.openWebSocket(serverURL);
     if (!ws) {
         log.error("Invalid sharing.serverURL");
         websocketStatus = "fail";
         return;
     }
     server = ws;
+    serverIsExternal = true;
     ws.setOpenCallback(() => {
         if (server !== ws) return;
         websocketStatus = "open";
         connectionAttempts = 0;
         ws.send(JSON.stringify({
-            action: "identify", key: sharingSettings.key, type: "room",
+            action: "identify", key, type: "room",
             status: { inMeeting: toWire(meetingState) },
         }));
     }).setMessageCallback((message) => {
@@ -255,7 +336,7 @@ function connectExternal() {
         if (connectionError) {
             log.debug("Lost connection to sharing websocket, will not reattempt due to error");
         } else {
-            log.debug(`Lost connection to sharing websocket, reconnecting in ${sharingSettings.waitBeforeRetry}s`);
+            log.debug(`Lost connection to sharing websocket, reconnecting in ${sharingValues.waitBeforeRetry}s`);
             scheduleReconnect();
         }
     }).setErrorCallback((desc) => {
@@ -268,11 +349,12 @@ function connectExternal() {
 }
 
 function connectSelfHosted() {
-    log.debug(`Starting self hosted server on port ${sharingSettings.port}`);
+    const { port } = sharingValues;
+    log.debug(`Starting self hosted server on port ${port}`);
     const srv = hs.httpserver.create();
-    srv.setPort(sharingSettings.port);
+    srv.setPort(port);
     srv.setCallback(() => {
-        const wsPath = `ws://${primaryIPv4()}:${sharingSettings.port}/ws`;
+        const wsPath = `ws://${primaryIPv4()}:${port}/ws`;
         return {
             status: 200,
             headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -287,13 +369,14 @@ function connectSelfHosted() {
     });
     srv.start();
     server = srv;
+    serverIsExternal = false;
     websocketStatus = "open";
 }
 
 function connectToSharing() {
     retryTimer = null;
-    if (!running || !sharingSettings.enabled) return;
-    if (sharingSettings.useServer) connectExternal(); else connectSelfHosted();
+    if (!running || !sharingMode) return;
+    if (sharingMode === "hosted") connectExternal(); else connectSelfHosted();
 }
 
 //-----------------------------------------
@@ -379,7 +462,7 @@ const WatchForMeeting = {
             running = true;
             connectionError = false;
             connectionAttempts = 0;
-            if (sharingSettings.enabled && validateShareSettings()) connectToSharing();
+            connectToSharing();
             if (menuBar && menubarSettings.enabled) menuBar.show();
             if (mode === "fake") WatchForMeeting.fake(); else WatchForMeeting.auto();
         }
@@ -465,16 +548,17 @@ const WatchForMeeting = {
 
 // Read-only
 Object.defineProperties(WatchForMeeting, {
-    // Array of valid event names for on() / once() / off()
-    events: { get: () => EVENTS, enumerable: true },
+    // Dictionary of valid event names for on() / once() / off(), e.g. events.meetingChange === "meetingChange"
+    events: { get: () => eventHandler.events, enumerable: true },
     meetingState: { get: () => meetingState, enumerable: true },
     meetingApp: { get: () => meetingApp, enumerable: true },
     faking: { get: () => faking, enumerable: true },
     zoom: { get: () => zoomMonitor.zoom, enumerable: true },
-    // Read/write. Assigning an object merges it over the current values; changes apply immediately.
+    // Read/write { mode, settings }. Assigning merges over the current values (throws, changing nothing,
+    // if the result is invalid); changes apply immediately, as do changes to sharing.mode / sharing.settings.*
     sharing: {
-        get: () => sharingSettings,
-        set: (v) => { Object.assign(sharingValues, v); applySharingChange(); },
+        get: () => sharingView,
+        set: assignSharing,
         enumerable: true,
     },
     apps: {
