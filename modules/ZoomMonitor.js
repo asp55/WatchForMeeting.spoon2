@@ -5,147 +5,77 @@
 // events we poll Zoom's "Meeting" menu. While in a meeting Zoom shows either
 // "Mute audio" or "Unmute audio" in that menu; neither exists outside a meeting.
 
-const { createLogger } = require("./Logger.js");
-const createEventHandler = require("./EventHandler.js");
-
-//-----------------------------------------
-// Logger & Events
-//-----------------------------------------
-const Logger = createLogger("WatchForMeeting.ZoomMonitor");
-const events = createEventHandler(["meetingChange"], "WatchForMeeting.ZoomMonitor");
-
-//-----------------------------------------
-// Declare Variables
-//-----------------------------------------
+const Monitor = require("./Monitor.js");
 
 const POLL_SECONDS = 0.5;
 const ZOOM_APP_NAME = "Zoom";
-
-// ZoomMonitor.zoom
-// Read-only hs.application for Zoom, or null if Zoom isn't running.
-let zoom = null;
-
-// ZoomMonitor.meetingState
-// Read-only { micOpen, videoOn, sharing } or null when not in a Zoom meeting.
-let meetingState = null;
-
-// private variable to track if the monitor is already running or not.
-let running = false;
-
-let pollTimer = null;
-
-//-----------------------------------------
-// End of Declare Variables
-//-----------------------------------------
-
-
-//-----------------------------------------
-// Zoom Monitor
-//-----------------------------------------
 
 function hasMenuItem(app, name) {
     return !!app.findMenuItemByPath(["Meeting", name]);
 }
 
-function readZoomState() {
-    zoom = hs.application.matchingName(ZOOM_APP_NAME) || null;
-    if(!zoom) return null;
+class ZoomMonitor extends Monitor {
+    #zoom = null;
+    #running = false;
+    #pollTimer = null;
 
-    const hasMute = hasMenuItem(zoom, "Mute audio");
-    const hasUnmute = hasMenuItem(zoom, "Unmute audio");
-    if(!hasMute && !hasUnmute) return null; // not in a meeting
-
-    return {
-        micOpen: !hasUnmute,
-        videoOn: !hasMenuItem(zoom, "Start video"),
-        sharing: !hasMenuItem(zoom, "Start share"),
-    };
-}
-
-function sameState(a, b) {
-    if(!a || !b) return a === b;
-    return a.micOpen === b.micOpen && a.videoOn === b.videoOn && a.sharing === b.sharing;
-}
-
-function checkZoom() {
-    let next;
-    try {
-        next = readZoomState();
-    }
-    catch(e) {
-        Logger.warn("Failed to read Zoom state:", e);
-        return;
+    constructor() {
+        super({ name: "ZoomMonitor", appName: "zoom" });
     }
 
-    if(!sameState(meetingState, next)) {
-        Logger.debug("Zoom meeting state:", JSON.stringify(next));
-        meetingState = next;
-        events.emit("meetingChange", { meetingState });
-    }
-}
-
-//-----------------------------------------
-// End Zoom Monitor
-//-----------------------------------------
-
-
-const ZoomMonitor = {
-    name: "WatchForMeeting.ZoomMonitor",
-    appName: "zoom",
-    logger: Logger,
-
+    // Read-only hs.application for Zoom, or null if Zoom isn't running.
     get zoom() {
-        return zoom;
-    },
-    get meetingState() {
-        return meetingState;
-    },
-};
-
-ZoomMonitor.on = function (event, fn) {
-    events.on(event, fn);
-    return module.exports;
-};
-
-ZoomMonitor.once = function (event, fn) {
-    events.once(event, fn);
-    return module.exports;
-};
-
-ZoomMonitor.off = function (event, fn) {
-    events.off(event, fn);
-    return module.exports;
-};
-
-ZoomMonitor.removeAllListeners = function (event) {
-    events.removeAllListeners(event);
-    return module.exports;
-};
-
-ZoomMonitor.start = function () {
-    Logger.debug(`start()${running ? " - skipping" : " - starting"}`);
-    if(!running) {
-        running = true;
-        pollTimer = hs.timer.doEvery(POLL_SECONDS, checkZoom);
-        checkZoom();
+        return this.#zoom;
     }
 
-    return module.exports;
-};
+    #readState() {
+        this.#zoom = hs.application.matchingName(ZOOM_APP_NAME) || null;
+        const zoom = this.#zoom;
+        if (!zoom) return null;
 
-ZoomMonitor.stop = function () {
-    Logger.debug("stop()");
+        const hasMute = hasMenuItem(zoom, "Mute audio");
+        const hasUnmute = hasMenuItem(zoom, "Unmute audio");
+        if (!hasMute && !hasUnmute) return null; // not in a meeting
 
-    running = false;
-    if(pollTimer) {
-        pollTimer.stop();
-        pollTimer = null;
+        return {
+            micOpen: !hasUnmute,
+            videoOn: !hasMenuItem(zoom, "Start video"),
+            sharing: !hasMenuItem(zoom, "Start share"),
+        };
     }
-    zoom = null;
-    meetingState = null;
 
-    return module.exports;
-};
+    #check() {
+        let next;
+        try {
+            next = this.#readState();
+        } catch (e) {
+            this.logger.warn("Failed to read Zoom state:", e);
+            return;
+        }
+        this.setMeetingState(next);
+    }
 
+    start() {
+        this.logger.debug(`start()${this.#running ? " - skipping" : " - starting"}`);
+        if (!this.#running) {
+            this.#running = true;
+            this.#pollTimer = hs.timer.doEvery(POLL_SECONDS, () => this.#check());
+            this.#check();
+        }
+        return this;
+    }
 
-module.exports = ZoomMonitor;
+    stop() {
+        this.logger.debug("stop()");
+        this.#running = false;
+        if (this.#pollTimer) {
+            this.#pollTimer.stop();
+            this.#pollTimer = null;
+        }
+        this.#zoom = null;
+        this.clearState();
+        return this;
+    }
+}
+
+module.exports = new ZoomMonitor();

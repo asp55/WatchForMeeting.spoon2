@@ -31,6 +31,7 @@ const eventHandler = createEventHandler(EVENT_NAMES, "WatchForMeeting");
 const menubarDefaults = { enabled: true, color: true, detailed: true, showFullState: true };
 
 // apps: which monitors run in automatic mode. If already started, changing will trigger a restart.
+// Keys must match each monitor's appName (see MONITORS).
 const appsDefaults = { zoom: false, teams: false };
 
 const menubarValues = { ...menubarDefaults };
@@ -151,15 +152,19 @@ function updateCallbacks() {
 //-----------------------------------------
 // Monitors
 //-----------------------------------------
+// Each monitor's appName is the key in the `apps` setting that enables it.
+const MONITORS = [zoomMonitor, teamsMonitor];
+
 function startMonitors() {
     log.debug("startMonitors");
-    if (appsSettings.zoom) zoomMonitor.start();
-    if (appsSettings.teams) teamsMonitor.start();
+    for (const m of MONITORS) {
+        if (appsSettings[m.appName]) m.start();
+    }
 }
 
 function stopMonitors(except) {
     log.debug(`stopMonitors(${except ? except.name : ""})`);
-    for (const m of [teamsMonitor, zoomMonitor]) {
+    for (const m of MONITORS) {
         if (m !== except) m.stop();
     }
 }
@@ -179,8 +184,7 @@ function handleAppChange(appMonitor) {
     }
 }
 
-zoomMonitor.on("meetingChange", () => handleAppChange(zoomMonitor));
-teamsMonitor.on("meetingChange", () => handleAppChange(teamsMonitor));
+for (const m of MONITORS) m.on("meetingChange", () => handleAppChange(m));
 
 //-----------------------------------------
 // Public API
@@ -230,6 +234,7 @@ const WatchForMeeting = {
         if (running) {
             faking = false;
             meetingState = null;
+            meetingApp = null;
             startMonitors();
             if (menuBar) {
                 menuBar.setMenu([
@@ -328,7 +333,7 @@ Object.defineProperties(WatchForMeeting, {
     logLevel: {
         get: () => log.level,
         set: (v) => {
-            for (const l of [log, eventHandler.logger, zoomMonitor.logger, teamsMonitor.logger, sharing.logger]) l.level = v;
+            for (const l of [log, eventHandler.logger, ...MONITORS.map((m) => m.logger), sharing.logger]) l.level = v;
         },
         enumerable: true,
     },
