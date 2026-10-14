@@ -45,16 +45,20 @@ function applyMenubarChange(key) {
     updateMenuIcon();
 }
 
-// Applies a change to the apps settings by restarting, so the right monitors run.
+// Applies a change to the apps settings by restarting the monitors only (sharing and the menu bar
+// are untouched). Only relevant in automatic mode; fake mode runs no monitors.
 function applyAppsChange() {
-    if (running) WatchForMeeting.restart();
+    if (!running || mode !== "auto") return;
+    stopMonitors();
+    WatchForMeeting.auto();
 }
 
-// Setting a key on the proxy applies the change immediately.
+// Setting a key on the proxy applies the change immediately, unless the value is unchanged.
 const makeSettingsProxy = (values, apply) => new Proxy(values, {
     set(target, key, value) {
+        const changed = target[key] !== value;
         target[key] = value;
-        apply(key);
+        if (changed) apply(key);
         return true;
     },
 });
@@ -204,9 +208,14 @@ const WatchForMeeting = {
         log.debug("stop()");
         running = false;
         sharing.stop();
+        stopMonitors();
+        // Reset so getters are accurate while stopped, and tell listeners a meeting has ended.
+        meetingState = null;
+        meetingApp = null;
+        faking = false;
+        updateCallbacks();
         lastMeetingState = null;
         if (menuBar) menuBar.hide();
-        stopMonitors();
         return WatchForMeeting;
     },
 
@@ -294,7 +303,11 @@ Object.defineProperties(WatchForMeeting, {
     },
     apps: {
         get: () => appsSettings,
-        set: (v) => { Object.assign(appsValues, v); applyAppsChange(); },
+        set: (v) => {
+            const before = JSON.stringify(appsValues);
+            Object.assign(appsValues, v);
+            if (JSON.stringify(appsValues) !== before) applyAppsChange();
+        },
         enumerable: true,
     },
     menubar: {

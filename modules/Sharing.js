@@ -251,6 +251,7 @@ function connectExternal() {
         if (server !== ws) return;
         let parsed;
         try { parsed = JSON.parse(message); } catch (err) { log.warn("Unparseable sharing message"); return; }
+        if (typeof parsed !== "object" || parsed === null) { log.warn("Unexpected sharing message"); return; }
         if (parsed.error) {
             // Only a rejected key is fatal; other errors leave the connection (and its reconnects) alone.
             if (parsed.errorType === "badkey") {
@@ -258,10 +259,12 @@ function connectExternal() {
                 disconnectFromSharing();
                 log.error("sharing.key not valid. Make sure that key has been established on the server.");
             } else {
-                log.warn("Sharing server reported an error:", parsed.errorType || message);
+                log.warn("Sharing server reported an error:", parsed.errorType || "unknown");
             }
         } else {
-            log.debug("Sharing websocket message received:", message);
+            // Never log the raw message: it could echo the sharing key.
+            log.debug("Sharing websocket message received:", JSON.stringify(
+                "key" in parsed ? { ...parsed, key: "[redacted]" } : parsed));
         }
     }).setCloseCallback(() => {
         if (server !== ws) return;

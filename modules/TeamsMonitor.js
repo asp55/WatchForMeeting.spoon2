@@ -121,16 +121,23 @@ function connectToTeams() {
 
     const onTeamsMessage = (message)=>{
         if(myId === teamsConnectionId) {
-            Logger.debug("Teams WebSocket Received", message);
-
             let parsed;
             try {
                 parsed = JSON.parse(message);
             }
             catch(e) {
-                Logger.warn("Failed to parse Teams message: ", message);
+                // Don't log the raw message: it may carry a token.
+                Logger.warn("Failed to parse Teams message");
                 return;
             }
+            if(typeof parsed !== "object" || parsed === null) {
+                Logger.warn("Unexpected Teams message");
+                return;
+            }
+
+            // Messages can carry a token (tokenRefresh), so never log them verbatim.
+            Logger.debug("Teams WebSocket Received", JSON.stringify(
+                parsed.tokenRefresh ? { ...parsed, tokenRefresh: "[redacted]" } : parsed));
 
             if(parsed.tokenRefresh) {
                 Logger.debug("Teams token refreshed");
@@ -139,6 +146,8 @@ function connectToTeams() {
 
             const update = parsed.meetingUpdate;
             if(update) {
+                // A meeting update proves the API is usable, so earlier closes weren't a block.
+                closedCount = 0;
                 if(update.meetingPermissions && update.meetingPermissions.canPair && !teamsPairing) {
                     Logger.debug("Sending pairing request");
                     teamsPairing = true;
