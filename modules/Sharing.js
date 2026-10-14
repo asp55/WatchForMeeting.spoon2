@@ -185,7 +185,12 @@ function broadcast() {
     } else {
         const msg = composeUpdate();
         for (const conn of [...clients]) {
-            try { conn.send(msg); } catch (err) { clients.delete(conn); }
+            try {
+                conn.send(msg);
+            } catch (err) {
+                log.debug("Dropping websocket client after send failed:", err);
+                clients.delete(conn);
+            }
         }
     }
 }
@@ -298,13 +303,18 @@ function connectSelfHosted() {
         return {
             status: 200,
             headers: { "Content-Type": "text/html; charset=utf-8" },
-            body: loadMonitorHtml().replace("%websocketpath%", wsPath),
+            body: loadMonitorHtml().replaceAll("%websocketpath%", () => wsPath),
         };
     });
     srv.setWebSocketCallback("/ws", (event, conn) => {
         if (event === "connected") {
             clients.add(conn);
-            try { conn.send(composeUpdate()); } catch (err) { clients.delete(conn); }
+            try {
+                conn.send(composeUpdate());
+            } catch (err) {
+                log.debug("Dropping websocket client after send failed:", err);
+                clients.delete(conn);
+            }
         } else if (event === "closed") {
             // Sending to a closed connection only logs a warning (it doesn't throw), so drop it here.
             clients.delete(conn);
@@ -344,7 +354,6 @@ function connectToSharing() {
 // Public API
 //-----------------------------------------
 const Sharing = {
-    name: "WatchForMeeting.Sharing",
     logger: log,
 
     // getMeetingState: () => the current { micOpen, videoOn, sharing } or null
