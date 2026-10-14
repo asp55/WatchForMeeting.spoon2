@@ -250,12 +250,12 @@ const WatchForMeeting = {
     },
 
     // Stop monitoring and report as being in a meeting.
-    fake(micOpen = false, videoOn = false, sharing = false) {
+    fake(micOpen = false, videoOn = false, screenSharing = false) {
         mode = "fake";
         if (running) {
             faking = true;
             meetingApp = "fake";
-            meetingState = { micOpen: !!micOpen, videoOn: !!videoOn, sharing: !!sharing };
+            meetingState = { micOpen: !!micOpen, videoOn: !!videoOn, sharing: !!screenSharing };
             stopMonitors();
 
             const menu = [
@@ -264,17 +264,17 @@ const WatchForMeeting = {
                 { title: "Busy", checked: true },
                 { title: "-" },
             ];
-            if (!(micOpen && videoOn && sharing)) {
+            if (!(micOpen && videoOn && screenSharing)) {
                 menu.push({ title: "Select All", fn: () => WatchForMeeting.fake(true, true, true) });
             } else {
                 menu.push({ title: "Select None", fn: () => WatchForMeeting.fake(false, false, false) });
             }
             menu.push(
-                { title: "  Mic On", checked: !!micOpen, fn: () => WatchForMeeting.fake(!micOpen, videoOn, sharing) },
-                { title: "  Video On", checked: !!videoOn, fn: () => WatchForMeeting.fake(micOpen, !videoOn, sharing) },
-                { title: "  Sharing Screen", checked: !!sharing, fn: () => WatchForMeeting.fake(micOpen, videoOn, !sharing) },
+                { title: "  Mic On", checked: !!micOpen, fn: () => WatchForMeeting.fake(!micOpen, videoOn, screenSharing) },
+                { title: "  Video On", checked: !!videoOn, fn: () => WatchForMeeting.fake(micOpen, !videoOn, screenSharing) },
+                { title: "  Sharing Screen", checked: !!screenSharing, fn: () => WatchForMeeting.fake(micOpen, videoOn, !screenSharing) },
             );
-            if (micOpen || videoOn || sharing) {
+            if (micOpen || videoOn || screenSharing) {
                 menu.push({ title: "Clear", fn: () => WatchForMeeting.fake(false, false, false) });
             }
             if (menuBar) menuBar.setMenu(menu);
@@ -295,7 +295,8 @@ const WatchForMeeting = {
 Object.defineProperties(WatchForMeeting, {
     // Dictionary of valid event names for on() / once() / off(), e.g. events.meetingChange === "meetingChange"
     events: { get: () => eventHandler.events, enumerable: true },
-    meetingState: { get: () => meetingState, enumerable: true },
+    // Immutable snapshot, so callers can't mutate internal state
+    meetingState: { get: () => (meetingState ? Object.freeze({ ...meetingState }) : null), enumerable: true },
     meetingApp: { get: () => meetingApp, enumerable: true },
     faking: { get: () => faking, enumerable: true },
     zoom: { get: () => zoomMonitor.zoom, enumerable: true },
