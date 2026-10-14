@@ -119,7 +119,7 @@ class TeamsMonitor extends Monitor {
                 if (update.meetingPermissions && update.meetingPermissions.canPair && !this.#pairing) {
                     this.logger.debug("Sending pairing request");
                     this.#pairing = true;
-                    if (this.#websocket) this.#websocket.send('{"action":"pair","parameters":{},"requestId":1}');
+                    if (this.#websocket) this.#websocket.send(JSON.stringify({ action: "pair", parameters: {}, requestId: 1 }));
                 }
 
                 const ms = update.meetingState;
@@ -163,7 +163,13 @@ class TeamsMonitor extends Monitor {
             .join("&");
         const url = `ws://localhost:8124?${query}`;
 
-        this.#websocket = hs.http.openWebSocket(url)
+        const ws = hs.http.openWebSocket(url);
+        if (!ws) {
+            this.logger.warn("Could not open a websocket to Teams, retrying in 30 seconds");
+            if (this.#running) this.#scheduleConnect(30);
+            return;
+        }
+        this.#websocket = ws
             .setOpenCallback(onOpen)
             .setMessageCallback(onMessage)
             .setCloseCallback(onClose)
