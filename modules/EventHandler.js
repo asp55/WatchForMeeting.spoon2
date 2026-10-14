@@ -26,7 +26,10 @@ function createEventHandler(acceptedEvents, objectName) {
         assertEvent(event);
         assertFn(fn);
         const list = listeners.get(event) || [];
-        if (!list.some((l) => l.fn === fn)) {
+        if (list.some((l) => l.fn === fn)) {
+            // A function is registered at most once per event; the first registration wins.
+            logger.debug(`listener already registered for event ${label(event)}; ignoring`);
+        } else {
             list.push({ fn, once });
             listeners.set(event, list);
             logger.debug(`added listener for event ${label(event)}`);
@@ -35,7 +38,6 @@ function createEventHandler(acceptedEvents, objectName) {
     };
 
     const handler = {
-        eventNames,
         events,
         logger,
 
